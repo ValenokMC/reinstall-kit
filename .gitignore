@@ -1,0 +1,9 @@
+# build output (program, installer)
+dist/
+# personal data that must never get into the repository
+settings.json
+journal.txt
+logs/
+*.log
+# Rust build files
+target/

@@ -1,0 +1,3 @@
+# The GNU toolchain's own linker is used, so a full MinGW installation does not add a second manifest.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-self-contained=yes"]

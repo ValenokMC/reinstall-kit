@@ -77,7 +77,7 @@ and you can edit it by hand:
 
 | Key | Meaning |
 | --- | --- |
-| `destinations` | One or two places for the copy. A `ReinstallKit` folder is created inside each. |
+| `destinations` | One or two places for the copy. A `ReinstallKit` folder lives inside each. The place is found by the marker file `ReinstallKit\.reinstallkit-disk`, not by the drive letter - see below. |
 | `secretsOnlyEncrypted` | `true`: items marked `secret` go only to a BitLocker-protected drive. |
 | `keepVersionsDays` | How many days previous versions of files are kept. |
 | `schedule` | `enabled` and `time` of the daily update. |
@@ -85,6 +85,15 @@ and you can edit it by hand:
 | `excludeAlways` | Patterns skipped in personal, project and own folders (`node_modules`, `venv`…). |
 | `inventory` | Which lists to save: programs, extensions, packages, tasks, startup, wsl, wifi, drivers. |
 | `items` | What to save. `path` - where it is on the computer, `dest` - folder inside the kit, `exclude` - patterns to skip, `files` - save only these files, `secret` / `secretFiles` - what counts as a secret. |
+
+**Which disk gets the copy.** Windows gives drive letters in the order disks are plugged in, so after you
+connect another disk the letter written in `settings.json` may belong to somebody else's disk. Reinstall Kit
+therefore copies only to a place that has the hidden marker file `.reinstallkit-disk` inside its `ReinstallKit`
+folder, wherever the disk's letter is now (a changed letter is shown in the log and fixed in the settings
+the next time you press **Save settings**). No marker, or the marker on two disks: nothing is copied and no
+folder is created. The marker is written only by you: **Set up -> Save settings** asks about each disk that has
+none, or run `ReinstallKit.exe --mark G:\Backups`. This matters most for the automatic run that starts whenever
+a drive is connected: it can never fill a disk you did not choose.
 
 Skip patterns: `/logs/**` counts from the top of the folder, `node_modules/**` or `*.tmp` match at any depth;
 `*` stays inside one folder name, `**` crosses folders. Letter case does not matter.

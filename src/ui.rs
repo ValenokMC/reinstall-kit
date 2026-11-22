@@ -1,5 +1,6 @@
 //! The window: Update / Check / Restore / Set up, a large pane with progress and a plain
 //! description of what is saved, and the Set up page with the scan results.
+use crate::disk::{self, Place};
 use crate::lang::fmt_size;
 use crate::out::{Msg, Out};
 use crate::scan::ScanResult;
@@ -366,11 +367,25 @@ impl App {
         }
         let mut fresh = false;
         let mut lines = vec![];
-        for d in dests {
+        for configured in dests {
+            // The disk is found by its marker file, so the letter shown here is the one it has now.
+            let d = match disk::resolve(&configured) {
+                Place::Ready(p) => p,
+                Place::Offline => {
+                    lines.push(tr!("st.dest.offline", configured));
+                    continue;
+                }
+                Place::Unmarked(_) => {
+                    lines.push(tr!("st.dest.nomark", configured));
+                    continue;
+                }
+                Place::Many(_) => {
+                    lines.push(tr!("st.dest.many", configured));
+                    continue;
+                }
+            };
             let st = Path::new(&d).join(KIT_FOLDER).join("_updated.txt");
-            if !sys::drive_there(&d) {
-                lines.push(tr!("st.dest.offline", d));
-            } else if let Ok(w) = std::fs::metadata(&st).and_then(|m| m.modified()) {
+            if let Ok(w) = std::fs::metadata(&st).and_then(|m| m.modified()) {
                 if w.elapsed().map(|e| e.as_secs() < 2 * 86400).unwrap_or(true) {
                     fresh = true;
                 }
@@ -407,7 +422,7 @@ impl App {
         }
         t += &format!("\n{}\n", tr!("about.h.where"));
         for d in s.dests() {
-            t += &format!("•  {}\n", Path::new(&d).join(KIT_FOLDER).display());
+            t += &format!("•  {}\n", Path::new(&disk::current(&d)).join(KIT_FOLDER).display());
         }
         t += &format!("\n{}\n{}\n", tr!("about.h.how"), tr!("about.how", s.keep_days()));
         t += &format!("\n{}\n{}\n", tr!("about.h.when"), if s.schedule.enabled { tr!("about.when.on", s.schedule.time) } else { tr!("about.when.off") });
@@ -487,7 +502,7 @@ impl App {
         if let Some(k) = &self.own_kit {
             return Some(k.clone());
         }
-        self.settings.as_ref()?.dests().into_iter().map(|d| Path::new(&d).join(KIT_FOLDER)).find(|k| k.join("files").is_dir()).map(|k| k.to_string_lossy().into_owned())
+        self.settings.as_ref()?.dests().into_iter().map(|d| Path::new(&disk::current(&d)).join(KIT_FOLDER)).find(|k| k.join("files").is_dir()).map(|k| k.to_string_lossy().into_owned())
     }
     fn open_restore(&mut self) {
         let kit = self.find_kit().or_else(|| {
@@ -641,7 +656,8 @@ impl App {
         }
         // Where, how and when.
         let s = self.settings.clone().unwrap_or_default();
-        let mut dests = s.dests();
+        // Show the places with the letters the disks have now (found by their marker files).
+        let mut dests: Vec<String> = s.dests().iter().map(|d| disk::current(d)).collect();
         if first {
             // Suggest the non-system drive with the most free space.
             if let Some(best) = scan.drives.iter().filter(|d| !d.system).max_by_key(|d| d.free) {
@@ -720,6 +736,36 @@ impl App {
             if sys::root_of(&p).is_none() {
                 warn(tr!("wiz.err.badpath", p));
                 return false;
+            }
+            // Copies go only to a disk with the marker file. A disk without it is marked here, and only
+            // when the user says yes: this is the one place a folder is created on a disk.
+            match disk::resolve(&p) {
+                Place::Ready(found) => p = found,
+                Place::Many(found) => {
+                    warn(tr!("wiz.err.many", p, found.join(", ")));
+                    return false;
+                }
+                Place::Offline => {} // the disk is not connected: saved as written, marked when saved with it connected
+                Place::Unmarked(found) => {
+                    let info = self.drive_of(&p).map(|d| format!("{} {} ({})", d.root, d.label, fmt_size(d.total))).unwrap_or_else(|| p.clone());
+                    let mut text = tr!("wiz.mark.ask", info, Path::new(&p).join(KIT_FOLDER).display(), disk::MARKER);
+                    if !found.is_empty() {
+                        text = format!("{}\n\n{}", text, tr!("upd.dest.unmarked", found.join(", ")));
+                    }
+                    let yes = rfd::MessageDialog::new()
+                        .set_level(rfd::MessageLevel::Warning)
+                        .set_title("Reinstall Kit")
+                        .set_description(text)
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show();
+                    if yes != rfd::MessageDialogResult::Yes {
+                        return false;
+                    }
+                    if let Err(e) = disk::mark(&p) {
+                        warn(tr!("wiz.err.mark", p, e));
+                        return false;
+                    }
+                }
             }
             dests.push(Dest { path: p });
         }

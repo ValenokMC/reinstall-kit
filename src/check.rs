@@ -1,4 +1,5 @@
 //! "Check": is everything in order? Changes nothing.
+use crate::disk::{self, Place};
 use crate::lang::fmt_size;
 use crate::out::{Msg, Out};
 use crate::settings::{item_title, settings_path, Settings, KIT_FOLDER};
@@ -41,13 +42,26 @@ fn run_inner(out: &Out) -> i32 {
 
     out.line(tr!("chk.h.kit"));
     let mut secrets_saved = false;
-    for d in &dests {
+    for configured in &dests {
         step += 1;
-        out.progress(step, steps, d);
-        if !sys::drive_there(d) {
-            note(tr!("chk.dest.offline", d));
-            continue;
-        }
+        out.progress(step, steps, configured);
+        // The disk is found by its marker file, not by the letter written in settings.
+        let found = match disk::resolve(configured) {
+            Place::Ready(p) => p,
+            Place::Offline => {
+                note(tr!("chk.dest.offline", configured));
+                continue;
+            }
+            Place::Unmarked(_) => {
+                bad!(tr!("chk.dest.nomark", configured, disk::MARKER));
+                continue;
+            }
+            Place::Many(found) => {
+                bad!(tr!("chk.dest.many", configured, found.join(", ")));
+                continue;
+            }
+        };
+        let d = &found;
         let kit = Path::new(d).join(KIT_FOLDER);
         let enc = sys::is_encrypted(d);
         let st = kit.join("_updated.txt");

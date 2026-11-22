@@ -1,6 +1,7 @@
 //! "Update the kit": copies everything selected into every available place.
 //! Only new and changed files are copied; previous versions and deleted files go to
 //! "_versions\<date>" and are removed after settings.keepVersionsDays days.
+use crate::disk::{self, Place};
 use crate::lang::fmt_size;
 use crate::out::{Msg, Out};
 use crate::scan::EDITOR_CLIS;
@@ -331,16 +332,42 @@ fn run_inner(dry: bool, auto: bool, out: &Out) -> i32 {
         return if auto { 3 } else { 2 };
     };
 
-    // Which places are available right now.
+    // Which places are available right now. A place is found by the marker file inside its kit folder,
+    // never by the drive letter alone: letters move when another disk is plugged in. No marker (or the
+    // marker on several disks) means nothing is copied there and no folder is created.
     let mut targets: Vec<PathBuf> = vec![];
+    let mut problems: Vec<String> = vec![];
     for d in &dests {
-        if !sys::drive_there(d) {
-            if !auto {
-                out.line(tr!("upd.dest.missing", d));
+        let place = match disk::resolve(d) {
+            Place::Ready(p) => p,
+            Place::Offline => {
+                if !auto {
+                    out.line(tr!("upd.dest.missing", d));
+                }
+                continue;
             }
-            continue;
+            Place::Unmarked(found) => {
+                let mut text = tr!("upd.dest.nomark", d, disk::MARKER);
+                if !found.is_empty() {
+                    text = format!("{} {}", text, tr!("upd.dest.unmarked", found.join(", ")));
+                }
+                out.line(text.clone());
+                journal(&format!("skip: {}", text));
+                problems.push(d.clone());
+                continue;
+            }
+            Place::Many(found) => {
+                let text = tr!("upd.dest.many", d, found.join(", "));
+                out.line(text.clone());
+                journal(&format!("skip: {}", text));
+                problems.push(d.clone());
+                continue;
+            }
+        };
+        if !place.trim_end_matches('\\').eq_ignore_ascii_case(d.trim_end_matches('\\')) {
+            out.line(tr!("upd.dest.moved", d, place));
         }
-        let kit = Path::new(d).join(KIT_FOLDER);
+        let kit = Path::new(&place).join(KIT_FOLDER);
         if auto && age_days(&kit.join("_updated.txt")).map(|a| a * 24.0 < 20.0).unwrap_or(false) {
             continue; // updated less than 20 hours ago
         }
@@ -349,6 +376,8 @@ fn run_inner(dry: bool, auto: bool, out: &Out) -> i32 {
     if targets.is_empty() {
         if !auto {
             out.line(tr!("upd.nowhere"));
+        } else if !problems.is_empty() && s.notify {
+            out.send(Msg::Toast(tr!("toast.nomark"), problems.join("; ")));
         }
         return if auto { 3 } else { 2 };
     }
@@ -365,9 +394,7 @@ fn run_inner(dry: bool, auto: bool, out: &Out) -> i32 {
         let kit_s = kit.to_string_lossy().into_owned();
         let place = kit.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
         let enc = sys::is_encrypted(&kit_s);
-        if !dry {
-            let _ = fs::create_dir_all(kit);
-        }
+        // The kit folder is never created here: it already exists, because the marker is inside it.
         out.line("");
         out.line(format!("{}{}{}", tr!("upd.kit", kit_s), if enc { format!("  {}", tr!("upd.kit.enc")) } else { String::new() }, if dry { format!("   {}", tr!("upd.dry")) } else { String::new() }));
         let mut total = Stats::default();
@@ -442,7 +469,10 @@ fn run_inner(dry: bool, auto: bool, out: &Out) -> i32 {
     }
 
     if auto && !dry && s.notify {
-        out.send(Msg::Toast(if any_err > 0 { tr!("toast.err") } else { tr!("toast.ok") }, toast.join("; ")));
+        for p in &problems {
+            toast.push(tr!("toast.line.nomark", p));
+        }
+        out.send(Msg::Toast(if any_err > 0 || !problems.is_empty() { tr!("toast.err") } else { tr!("toast.ok") }, toast.join("; ")));
     }
     if any_err > 0 {
         1

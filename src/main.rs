@@ -4,6 +4,7 @@
 #![windows_subsystem = "windows"]
 
 mod check;
+mod disk;
 mod lang;
 mod out;
 mod restore;
@@ -67,6 +68,25 @@ fn main() {
         "--unschedule" => {
             sys::task_delete(sys::TASK_NAME);
             0
+        }
+        // Marks the disk for copies: `ReinstallKit.exe --mark G:\Backups`. Only on the user's own command.
+        "--mark" => {
+            let place = arg(1);
+            if sys::root_of(&place).is_none() {
+                let _ = writeln!(std::io::stdout(), "{}", tr!("wiz.err.badpath", place));
+                2
+            } else {
+                match disk::mark(&place) {
+                    Ok(()) => {
+                        let _ = writeln!(std::io::stdout(), "{}", tr!("mark.done", place));
+                        0
+                    }
+                    Err(e) => {
+                        let _ = writeln!(std::io::stdout(), "{}", tr!("wiz.err.mark", place, e));
+                        1
+                    }
+                }
+            }
         }
         "--toast" => {
             let a = arg(1);

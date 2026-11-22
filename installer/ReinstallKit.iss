@@ -1,7 +1,7 @@
 ﻿; Reinstall Kit installer (Inno Setup 6). Built by: src\build.ps1 -Installer
 ; Installs for the current user only, so no administrator rights are needed and the settings file
 ; next to the program stays writable.
-#define AppVer "1.0.0"
+#define AppVer "1.0.1"
 
 [Setup]
 AppId={{6E0B7C4A-52D9-4E0E-9A54-3D0F1B7A9C21}
